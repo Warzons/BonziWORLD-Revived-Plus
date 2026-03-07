@@ -18,12 +18,12 @@ try {
 			);
 			console.log("Created new settings file.");
 		} catch(e) {
-			console.log(e);
+			console.error("Error copying settings.example.json to settings.json:", e);
 			throw "Could not create new settings file.";
 		}
 	// Else, there was a misc error (permissions?)
 	} else {
-		console.log(e);
+		console.error("Error reading settings.json:", e);
 		throw "Could not read 'settings.json'.";
 	}
 }
@@ -31,6 +31,13 @@ try {
 // Load settings into memory
 const settings = require("./settings.json");
 
+try {
+	global.settings = require("./settings.json");
+} catch (err) {
+	console.error("Failed to load settings.json:", err);
+	process.exit(1);
+}
+// Use global.settings everywhere instead of redeclaring
 // Setup basic express server
 const path = require('path');
 
@@ -80,11 +87,8 @@ var server = require('http').createServer(app);
 
 // Init socket.io
 var io = require('socket.io')(server);
-var port = process.env.PORT || 80;
-// Some hosts (or misconfigured envs) may set PORT to 10000 — prefer configured port 80
-if (Number(port) === 10000) {
-	port = 80;
-}
+var port = 3505;
+// Port is now hardcoded to 3505
 exports.io = io;
 
 // Init sanitize-html
@@ -99,27 +103,46 @@ const log = Log.log;
 const Ban = require('./ban.js');
 Ban.init();
 // Start actually listening
-server.listen(port, function () {
-	console.log(
-		" Welcome to BonziWORLD!\n",
-		"Time to meme!\n",
-		"----------------------\n",
-		"Server listening at port " + port
-	);
-});
-app.use(express.static(__dirname + '/public'));
+try {
+	server.listen(port, function () {
+		console.log(
+			" Welcome to BonziWORLD!\n",
+			"Time to meme!\n",
+			"----------------------\n",
+			"Server listening at port " + port
+		);
+	});
+	app.use(express.static(__dirname + '/public'));
+} catch (err) {
+	console.error("Server failed to start:", err);
+	if (err.code) console.error("Error code:", err.code);
+	if (err.errno) console.error("Error errno:", err.errno);
+	if (err.syscall) console.error("Error syscall:", err.syscall);
+	if (err.stack) console.error("Error stack:", err.stack);
+	process.exit(1);
+}
 
 // --------- wiki backend API ------------------------------------------------
-const Wiki = require('./wiki');
-Wiki.load();
+try {
+	const Wiki = require('./wiki');
+	Wiki.load();
+	global.Wiki = Wiki;
+} catch (err) {
+	console.error("Error loading Wiki module:", err);
+	process.exit(1);
+}
 
-// require session middleware for auth
-const session = require('express-session');
-app.use(session({
-    secret: settings.sessionSecret || 'secret',
-    resave: false,
-    saveUninitialized: true
-}));
+try {
+	const session = require('express-session');
+	app.use(session({
+		secret: settings.sessionSecret || 'secret',
+		resave: false,
+		saveUninitialized: true
+	}));
+} catch (err) {
+	console.error("Error loading session middleware:", err);
+	process.exit(1);
+}
 
 function ensureAuth(req, res, next) {
     if (req.session && req.session.user) return next();
@@ -182,9 +205,14 @@ app.delete('/api/wiki/:id', ensureAuth, (req, res) => {
 });
 
 // Health check endpoint for hosting platforms
-app.get('/health', function (req, res) {
-	res.status(200).send('OK');
-});
+try {
+	app.get('/health', function (req, res) {
+		res.status(200).send('OK');
+	});
+} catch (err) {
+	console.error("Error loading health endpoint:", err);
+	process.exit(1);
+}
 
 // ========================================================================
 // Banning functions
@@ -194,18 +222,38 @@ app.get('/health', function (req, res) {
 // Helper functions
 // ========================================================================
 
-const Utils = require("./utils.js")
+try {
+	const Utils = require("./utils.js");
+	global.Utils = Utils;
+} catch (err) {
+	console.error("Error loading Utils module:", err);
+	process.exit(1);
+}
 
 // ========================================================================
 // The Beef(TM)
 // ========================================================================
 
 const Meat = require("./meat.js");
-Meat.beat();
+try {
+	const Meat = require("./meat.js");
+	Meat.beat();
+	global.Meat = Meat;
+} catch (err) {
+	console.error("Error loading Meat module or calling beat():", err);
+	process.exit(1);
+}
 
 // Console commands
 const Console = require('./console.js');
-Console.listen();
+try {
+	const Console = require('./console.js');
+	Console.listen();
+	global.Console = Console;
+} catch (err) {
+	console.error("Error loading Console module or calling listen():", err);
+	process.exit(1);
+}
 
 // ========================================================================
 // BOTS -- DO NOT USE

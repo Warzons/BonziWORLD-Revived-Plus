@@ -7,5 +7,8 @@
   },
   "devDependencies": {
     "split-lines": "^3.0.0"
+  },
+  "dependencies": {
+    "express-session": "^1.19.0"
   }
 }
