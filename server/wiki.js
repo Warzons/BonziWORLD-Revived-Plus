@@ -4,6 +4,14 @@ const path = require('path');
 const DATA_FILE = path.join(__dirname, 'wiki.json');
 let data = [];
 
+// load settings (used for openaiApiKey fallback)
+let settings = {};
+try {
+    settings = require('./settings.json');
+} catch (e) {
+    settings = {};
+}
+
 // articles will have shape {id,title,category,content,date,author,versions:[...]} 
 
 function load() {
@@ -91,19 +99,20 @@ function remove(id) {
 // moderation using external AI service if configured, otherwise fallback
 async function moderate(text) {
     if (typeof text !== 'string') return true;
-    if (process.env.OPENAI_API_KEY) {
+    // prefer environment variable only for OpenAI key
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (apiKey) {
         try {
             const fetch = require('node-fetch');
             const resp = await fetch('https://api.openai.com/v1/moderations', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+                    'Authorization': `Bearer ${apiKey}`
                 },
                 body: JSON.stringify({ model: 'omni-moderation-latest', input: text })
             });
             const data = await resp.json();
-            // assume categories.blocked is true when text is bad
             if (data && data.results && data.results[0] && data.results[0].flagged) {
                 return false;
             }

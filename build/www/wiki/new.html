@@ -48,6 +48,7 @@
       </ul>
       <ul class="nav navbar-nav navbar-right">
         <li><a href="/wiki/login.html"><span class="glyphicon glyphicon-log-in"></span> Login</a></li>
+        <li><a href="/wiki/signup.html"><span class="glyphicon glyphicon-user"></span> Signup</a></li>
       </ul>
     </div>
   </div>
@@ -95,24 +96,29 @@
   </section>
 </div>
 <footer id="container-fluid-text-center">
-  <p id="footer">Made With &#9749</p><br>
-  <p id="footer">By: BonziWORLD</p>
 </footer>
 <script>
-// search placeholder
-$('#searching').click(function(){alert('Search not available');});
-
-// handle new wiki article submission
+// handle new wiki article submission: require authentication first
 $('#new-article-form').submit(function(e){
-    e.preventDefault();
+  e.preventDefault();
+  $.get('/api/me').done(function(resp){
+    if (!resp || !resp.user) {
+      alert('Authentication required. Please login or signup first.');
+      window.location.href = '/wiki/login.html?next=/wiki/new';
+      return;
+    }
     const payload = {
-        title: $('input[name="wiki[title]"]').val(),
-        category: $('input[name="wiki[category]"]').val(),
-        content: $('textarea[name="wiki[content]"]').val()
+      title: $('input[name="wiki[title]"]').val(),
+      category: $('input[name="wiki[category]"]').val(),
+      content: $('textarea[name="wiki[content]"]').val()
     };
-    $.ajax({url: '/api/wiki', method: 'POST', data: payload})
-        .done(function(){ alert('Article submitted'); window.location.href = '/wiki/show'; })
-        .fail(function(err){ alert('Failed: '+err.responseJSON?.error); });
+    $.ajax({url: '/api/wiki', method: 'POST', contentType: 'application/json', data: JSON.stringify(payload)})
+      .done(function(){ alert('Article submitted'); window.location.href = '/wiki/show'; })
+      .fail(function(err){ alert('Failed: '+(err.responseJSON?.error||err.statusText)); });
+  }).fail(function(){
+    alert('Authentication required. Please login.');
+    window.location.href = '/wiki/login.html?next=/wiki/new';
+  });
 });
 </script>
 <script src="/socket.io/socket.io.js"></script>

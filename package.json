@@ -9,6 +9,7 @@
     "split-lines": "^3.0.0"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "express-session": "^1.19.0"
   }
 }

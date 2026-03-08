@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>BonziWIKI - Login</title>
+    <title>BonziWIKI - Signup</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="/dist/css/bootstrap.css">
@@ -21,13 +21,13 @@
   </div>
 </nav>
 <div class="container mt-4" id="content">
-  <h1>Login</h1>
-  <form id="login-form">
+  <h1>Signup</h1>
+  <form id="signup-form">
     <label>Username:</label><br>
     <input type="text" name="user"><br>
     <label>Password:</label><br>
     <input type="password" name="pass"><br><br>
-    <button type="submit" class="btn btn-primary">Login</button>
+    <button type="submit" class="btn btn-primary">Signup</button>
   </form>
 </div>
 <script>
@@ -36,17 +36,17 @@ function getNextParam() {
   return qs.get('next') || null;
 }
 
-$('#login-form').submit(function(e){
+$('#signup-form').submit(function(e){
   e.preventDefault();
   const payload = { user: $('input[name=user]').val(), pass: $('input[name=pass]').val() };
   const next = getNextParam();
   if (next) payload.next = next;
-  $.ajax({url:'/login',method:'POST',contentType:'application/json',data:JSON.stringify(payload)})
+  $.ajax({url:'/signup',method:'POST',contentType:'application/json',data:JSON.stringify(payload)})
     .done(function(resp){
       const dest = (resp && resp.next) ? resp.next : '/wiki/show';
       window.location.href = dest;
     })
-    .fail(function(xhr){ alert('Login failed: '+(xhr.responseJSON?.error||xhr.statusText)); });
+    .fail(function(xhr){ alert('Signup failed: '+(xhr.responseJSON?.error||xhr.statusText)); });
 });
 </script>
 </body>

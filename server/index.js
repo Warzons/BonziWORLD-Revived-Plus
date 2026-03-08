@@ -4,6 +4,7 @@
 
 // Filesystem reading functions
 const fs = require('fs-extra');
+const bcrypt = require('bcryptjs');
 
 // Load settings
 try {
@@ -132,6 +133,36 @@ try {
 	process.exit(1);
 }
 
+// load users for wiki authentication (simple JSON store)
+const USERS_FILE = path.join(__dirname, 'users.json');
+let users = [];
+function loadUsers() {
+	try {
+		users = fs.readJsonSync(USERS_FILE);
+		if (!Array.isArray(users)) users = [];
+		// migrate plaintext passwords to bcrypt hashes
+		let migrated = false;
+		users = users.map(u => {
+			if (!u || !u.pass) return u;
+			const pass = u.pass;
+			if (typeof pass === 'string' && pass.startsWith('$2')) return u; // already hashed
+			const hash = bcrypt.hashSync(pass, 10);
+			migrated = true;
+			return { user: u.user, pass: hash };
+		});
+		if (migrated) {
+			try { fs.writeJsonSync(USERS_FILE, users); } catch (e) { console.error('Failed to write migrated users', e); }
+		}
+	} catch (e) {
+		users = [];
+		try { fs.writeJsonSync(USERS_FILE, users); } catch (e) {}
+	}
+}
+function saveUsers() {
+	try { fs.writeJsonSync(USERS_FILE, users); } catch (e) { console.error('Failed to save users', e); }
+}
+loadUsers();
+
 try {
 	const session = require('express-session');
 	app.use(session({
@@ -144,6 +175,22 @@ try {
 	process.exit(1);
 }
 
+// Serve extensionless wiki routes (e.g. /wiki/show -> /build/www/wiki/show.html)
+app.use((req, res, next) => {
+	try {
+		if (!req.path.startsWith('/wiki')) return next();
+		// map /wiki or /wiki/ to /wiki/index.html
+		const rel = req.path === '/wiki' ? '/wiki/index' : req.path;
+		const candidate = path.join(__dirname, '..', 'build', 'www', rel + '.html');
+		if (fs.existsSync(candidate)) return res.sendFile(candidate);
+		const candidateIndex = path.join(__dirname, '..', 'build', 'www', req.path, 'index.html');
+		if (fs.existsSync(candidateIndex)) return res.sendFile(candidateIndex);
+	} catch (e) {
+		// ignore and continue to next
+	}
+	return next();
+});
+
 function ensureAuth(req, res, next) {
     if (req.session && req.session.user) return next();
     res.status(401).json({ error: 'authentication required' });
@@ -151,16 +198,40 @@ function ensureAuth(req, res, next) {
 
 // login/logout simple handlers (username/password from settings)
 app.post('/login', (req, res) => {
-    const { user, pass } = req.body;
-    if (user === settings.auth.user && pass === settings.auth.pass) {
-        req.session.user = user;
-        res.json({ ok: true });
-    } else {
-        res.status(403).json({ error: 'invalid credentials' });
-    }
+	const { user, pass, next } = req.body;
+	// check settings auth
+	if (settings.auth && user === settings.auth.user && pass === settings.auth.pass) {
+		req.session.user = user;
+		return res.json({ ok: true, next: next || '/wiki/show' });
+	}
+	// check users.json (bcrypt compare)
+	const u = users.find(x => x.user === user);
+	if (u && u.pass && bcrypt.compareSync(pass, u.pass)) {
+		req.session.user = user;
+		return res.json({ ok: true, next: next || '/wiki/show' });
+	}
+	res.status(403).json({ error: 'invalid credentials' });
+});
+
+// signup endpoint: adds a simple user to users.json (password hashed)
+app.post('/signup', (req, res) => {
+	const { user, pass, next } = req.body;
+	if (!user || !pass) return res.status(400).json({ error: 'user and pass required' });
+	if (settings.auth && user === settings.auth.user) return res.status(400).json({ error: 'username unavailable' });
+	if (users.find(u => u.user === user)) return res.status(400).json({ error: 'username exists' });
+	const hash = bcrypt.hashSync(pass, 10);
+	users.push({ user, pass: hash });
+	saveUsers();
+	req.session.user = user;
+	res.json({ ok: true, next: next || '/wiki/show' });
 });
 app.post('/logout', (req, res) => {
     req.session.destroy(() => res.json({ ok: true }));
+});
+
+// return current user session info
+app.get('/api/me', (req, res) => {
+	res.json({ user: req.session && req.session.user ? req.session.user : null });
 });
 
 // GET /api/wiki with optional filters

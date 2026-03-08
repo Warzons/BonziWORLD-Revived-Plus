@@ -48,6 +48,7 @@
       </ul>
       <ul class="nav navbar-nav navbar-right">
         <li><a href="/wiki/login.html"><span class="glyphicon glyphicon-log-in"></span> Login</a></li>
+        <li><a href="/wiki/signup.html"><span class="glyphicon glyphicon-user"></span> Signup</a></li>
       </ul>
     </div>
   </div>
@@ -97,16 +98,12 @@
   </main>
 </div>
 <footer id="container-fluid-text-center">
-  <p id="footer">Made With &#9749</p><br>
-  <p id="footer">By: BonziWORLD</p>
 </footer>
 <script>
-// search handler: reload page with query
-$('#searching').click(function(){
-    const q = $('input[name="x"]').val();
-    if (q) {
-        window.location.search = 'search=' + encodeURIComponent(q);
-    }
+// search handler: perform AJAX search (no full reload)
+$('#searching').off('click').on('click', function(){
+  const q = $('input[name="x"]').val();
+  if (q) ajaxSearch(q);
 });
 
 // load articles list dynamically
@@ -151,11 +148,12 @@ $.get(url).done(renderArticles);
 
 // author filter click handler
 $('#author-filter').click(function(e){
-    e.preventDefault();
-    const name = prompt('Enter author name:');
-    if (name) {
-        window.location.search = 'author=' + encodeURIComponent(name);
-    }
+  e.preventDefault();
+  const name = prompt('Enter author name:');
+  if (name) {
+    // load filtered results via AJAX
+    $.get('/api/wiki', { author: name }).done(renderArticles);
+  }
 });
 
 // history button handler
