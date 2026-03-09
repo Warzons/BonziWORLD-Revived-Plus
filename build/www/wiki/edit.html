@@ -82,38 +82,154 @@
 
 <div class="container mt-4" id="content">
   <h1>Edit Article</h1>
-  <form>
+  <form id="edit-article-form">
     <label for="wiki[title]">Title:</label>
-    <input type="text" name="wiki[title]" value="Example Article"><br><br>
+    <input type="text" name="wiki[title]" value=""><br><br>
     <label for="wiki[category]">Category:</label>
-    <input type="text" name="wiki[category]" value="Demo"><br><br>
+    <input type="text" name="wiki[category]" value=""><br><br>
     <label for="wiki[content]">Content:</label>
-    <textarea class="form-control" name="wiki[content]" rows="20">This is a placeholder content.</textarea><br>
+    <textarea class="form-control" name="wiki[content]" rows="20"></textarea><br>
     <input type="submit" class="btn btn-lg btn-primary" value="Submit">
-  </form>
-  <form>
     <button type="button" class="btn-lg btn-danger" id="delete-btn">Delete</button>
   </form>
 </div>
 <footer id="container-fluid-text-center">
 </footer>
 <script>
+// Load article data by ID into the form on page load
+function loadArticleData() {
+  $.get('/api/wiki').done(function(list){
+    const art = list.find(a=>a.id==id);
+    if (art) {
+      $('input[name="wiki[title]"]').val(art.title);
+      $('input[name="wiki[category]"]').val(art.category);
+      $('textarea[name="wiki[content]"]').val(art.content);
+    }
+  });
+}
+
+// Real-time push: emit changes to server/clients as user types
+let socket;
+if (typeof io !== 'undefined') {
+  socket = io();
+}
+
+function emitEditChange() {
+  if (socket && lockAcquired) {
+    socket.emit('wiki:edit', {
+      id: id,
+      title: $('input[name="wiki[title]"]').val(),
+      category: $('input[name="wiki[category]"]').val(),
+      content: $('textarea[name="wiki[content]"]').val()
+    });
+  }
+}
+
+// Listen for real-time changes from other clients (read-only for others)
+if (socket) {
+  socket.on('wiki:edit', function(data) {
+    if (data.id == id && !lockAcquired) {
+      $('input[name="wiki[title]"]').val(data.title);
+      $('input[name="wiki[category]"]').val(data.category);
+      $('textarea[name="wiki[content]"]').val(data.content);
+    }
+  });
+}
+
+// Bind input events for real-time push
+$(function(){
+  loadArticleData();
+  $('input[name="wiki[title]"], input[name="wiki[category]"], textarea[name="wiki[content]"]').on('input', emitEditChange);
+});
 // search placeholder
 $('#searching').click(function(){alert('Search not available');});
+// compute numeric article id from path (/wiki/:id/edit)
+const pathParts = window.location.pathname.split('/').filter(p => p);
+const id = parseInt(pathParts[pathParts.length - 2]);
+let lockAcquired = false;
+
+function setFormDisabled(disabled, msg) {
+  $('#edit-article-form :input').prop('disabled', disabled);
+  if (disabled && msg) {
+    if (!$('#lock-msg').length) $('#edit-article-form').prepend(`<div id="lock-msg" class="alert alert-danger">${msg}</div>`);
+    else $('#lock-msg').text(msg);
+  } else {
+    $('#lock-msg').remove();
+  }
+}
+
+function acquireLock() {
+  $.post('/api/wiki/' + id + '/lock')
+    .done(function(){
+      lockAcquired = true;
+      setFormDisabled(false);
+      // Optionally, load article data here
+      $.get('/api/wiki').done(function(list){
+        const art = list.find(a=>a.id==id);
+        if (art) {
+          $('input[name="wiki[title]"]').val(art.title);
+          $('input[name="wiki[category]"]').val(art.category);
+          $('textarea[name="wiki[content]"]').val(art.content);
+        }
+      });
+    })
+    .fail(function(xhr){
+      setFormDisabled(true, xhr.responseJSON?.error||'This article is locked by another user.');
+    });
+}
+
+function releaseLock() {
+  if (lockAcquired) {
+    $.post('/api/wiki/' + id + '/unlock');
+    lockAcquired = false;
+  }
+}
+
+// Try to acquire lock on page load
+$(function(){
+  acquireLock();
+});
+
+// Release lock on unload
+window.addEventListener('beforeunload', releaseLock);
 
 // handle edit submission (id must be filled manually or via script)
 $('#edit-article-form').submit(function(e){
-    e.preventDefault();
-    const id = window.location.pathname.split('/').pop(); // simplistic
-    const payload = {
-        title: $('input[name="wiki[title]"]').val(),
-        category: $('input[name="wiki[category]"]').val(),
-        content: $('textarea[name="wiki[content]"]').val()
-    };
-    $.ajax({url: '/api/wiki/' + id, method: 'PUT', data: payload})
-        .done(function(){ alert('Article updated'); window.location.href = '/wiki/show'; })
-        .fail(function(err){ alert('Failed: '+err.responseJSON?.error); });
+  e.preventDefault();
+  if (!lockAcquired) return;
+  const payload = {
+    title: $('input[name="wiki[title]"]').val(),
+    category: $('input[name="wiki[category]"]').val(),
+    content: $('textarea[name="wiki[content]"]').val()
+  };
+  $.ajax({
+    url: '/api/wiki/' + id,
+    method: 'PUT',
+    contentType: 'application/json',
+    data: JSON.stringify(payload)
+  })
+  .done(function(){ releaseLock(); alert('Article updated'); window.location.href = '/wiki/show'; })
+  .fail(function(err){ alert('Failed: '+(err.responseJSON?.error||err.statusText)); });
 });
+
+// handle delete
+$('#delete-btn').click(function(){
+  if (!confirm('Are you sure you want to delete this article?')) return;
+  $.ajax({
+    url: '/api/wiki/' + id,
+    method: 'DELETE'
+  })
+  .done(function(){ releaseLock(); alert('Article deleted'); window.location.href = '/wiki/show'; })
+  .fail(function(err){ alert('Failed: '+(err.responseJSON?.error||err.statusText)); });
+});
+
+// live update: reload if article is updated/deleted elsewhere
+if (typeof io !== 'undefined') {
+  const socket = io();
+  socket.on('wiki:update', function (data) {
+    if (location.pathname.startsWith('/wiki/edit')) location.reload();
+  });
+}
 </script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/wiki.js"></script>

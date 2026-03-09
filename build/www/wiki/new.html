@@ -120,6 +120,13 @@ $('#new-article-form').submit(function(e){
     window.location.href = '/wiki/login.html?next=/wiki/new';
   });
 });
+// live update: reload if articles are updated elsewhere
+if (typeof io !== 'undefined') {
+  const socket = io();
+  socket.on('wiki:update', function (data) {
+    if (location.pathname.startsWith('/wiki/new')) location.reload();
+  });
+}
 </script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/wiki.js"></script>

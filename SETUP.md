@@ -12,8 +12,6 @@ node index.js
 ```
 After this, BonziWORLD Renewed+ will be accessible at the port specified by the `PORT` environment variable (for example `http://localhost:3000/` if you set `PORT=3000`).
 
-You'll also be able to visit `/wiki` for the wiki.  Set credentials in `server/settings.json` under `auth` (user/pass) and `sessionSecret`.  To enable AI moderation, export `OPENAI_API_KEY`.
-
 ## Disclaimer
 I'm not responsible if you screw up anything with your computer while setting this up. I have no idea how you would, but someone will find a way. I also will not provide support for installing dependencies. If you have everything installed properly, the above commands will work.
 

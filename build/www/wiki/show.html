@@ -116,6 +116,8 @@ function renderArticles(list){
             if (a.versions && a.versions.length) {
                 historyBtn = `<button class="btn btn-xs btn-default history-btn" data-id="${a.id}">History (${a.versions.length})</button>`;
             }
+            const views = a.views || 0;
+            const commentsCount = (a.comments && a.comments.length) || 0;
             container.append(`
             <hr>
             <h2>Title: ${a.title}</h2>
@@ -123,8 +125,20 @@ function renderArticles(list){
             <p><em>by ${a.author||'anonymous'}</em></p>
             <p>${a.content}</p>
             <p class="date">${a.date.split('T')[0]}</p>
+            <p>Views: <span class="views" data-id="${a.id}">${views}</span> — Comments: <span class="comments-count" data-id="${a.id}">${commentsCount}</span></p>
             ${historyBtn}
             <a href="/wiki/${a.id}/edit" class="btn btn-primary btn-warning">Edit</a>
+            <div class="comment-section" data-id="${a.id}">
+              <div class="comments-list">
+                ${(a.comments||[]).map(c=>`<div class="comment" data-cid="${c.id}"><strong>${c.author}:</strong> ${c.content} <small>(${c.date.split('T')[0]})</small>
+                  ${(c.replies||[]).map(r=>`<div class="reply"><strong>${r.author}:</strong> ${r.content}</div>`).join('')}
+                </div>`).join('')}
+              </div>
+              <div class="comment-form">
+                <textarea class="form-control comment-input" rows="2" placeholder="Add a comment"></textarea>
+                <button class="btn btn-sm btn-success comment-submit" data-id="${a.id}">Post Comment</button>
+              </div>
+            </div>
             <hr>
         `);
     });
@@ -168,6 +182,51 @@ $(document).on('click', '.history-btn', function(){
     });
 });
 
+// live update: reload articles if updated elsewhere
+if (typeof io !== 'undefined') {
+  const socket = io();
+  socket.on('wiki:update', function (data) {
+    if (location.pathname.startsWith('/wiki/show')) location.reload();
+  });
+  // live view updates
+  socket.on('wiki:view', function (data) {
+    $('[data-id="'+data.id+'"].views').text(data.views);
+  });
+  // live comment additions
+  socket.on('wiki:comment', function (data) {
+    const list = $('.comment-section[data-id="'+data.id+'"] .comments-list');
+    if (list.length) {
+      list.append(`<div class="comment" data-cid="${data.comment.id}"><strong>${data.comment.author}:</strong> ${data.comment.content}</div>`);
+      const countEl = $('.comments-count[data-id="'+data.id+'"]');
+      countEl.text(parseInt(countEl.text()||0)+1);
+    }
+  });
+  socket.on('wiki:reply', function (data) {
+    const commentEl = $('.comment-section[data-id="'+data.id+'"] .comment[data-cid="'+data.commentId+'"]');
+    if (commentEl.length) {
+      commentEl.append(`<div class="reply"><strong>${data.reply.author}:</strong> ${data.reply.content}</div>`);
+    }
+  });
+}
+// increment view counts for articles on load (fire-and-forget)
+$(function(){
+  $('.views').each(function(){
+    const id = $(this).data('id');
+    // fire request to increment
+    $.post('/api/wiki/'+id+'/view').fail(()=>{});
+  });
+  // comment submit handler
+  $(document).on('click', '.comment-submit', function(){
+    const id = $(this).data('id');
+    const container = $('.comment-section[data-id="'+id+'"]');
+    const input = container.find('.comment-input');
+    const content = input.val();
+    if (!content) return alert('Comment empty');
+    $.ajax({url:'/api/wiki/'+id+'/comment', method:'POST', contentType:'application/json', data: JSON.stringify({ content })})
+      .done(function(comment){ input.val(''); })
+      .fail(function(err){ alert('Failed to post comment: '+(err.responseJSON?.error||err.statusText)); });
+  });
+});
 </script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/wiki.js"></script>

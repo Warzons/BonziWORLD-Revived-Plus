@@ -96,6 +96,14 @@
     <script>
       // search placeholder
       $('#searching').click(function(){alert('Search not available');});
+
+      // Hide Login/Signup buttons if authenticated
+      $.get('/api/me').done(function(resp){
+        if(resp && resp.user){
+          $('a[href="/wiki/login.html"]').hide();
+          $('a[href="/wiki/signup.html"]').hide();
+        }
+      });
     </script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="/js/wiki.js"></script>

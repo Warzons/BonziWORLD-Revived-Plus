@@ -1,6 +1,13 @@
 // ========================================================================
 // Server init
 // ========================================================================
+// Debug: Log uncaught exceptions and unhandled promise rejections
+process.on('uncaughtException', (err) => {
+	console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+	console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 // Filesystem reading functions
 const fs = require('fs-extra');
@@ -18,6 +25,8 @@ try {
 				'settings.json'
 			);
 			console.log("Created new settings file.");
+
+
 		} catch(e) {
 			console.error("Error copying settings.example.json to settings.json:", e);
 			throw "Could not create new settings file.";
@@ -178,6 +187,12 @@ try {
 // Serve extensionless wiki routes (e.g. /wiki/show -> /build/www/wiki/show.html)
 app.use((req, res, next) => {
 	try {
+		// Serve /wiki/:id/edit as /build/www/wiki/edit.html for all article IDs
+		const editMatch = req.path.match(/^\/wiki\/(\d+)\/edit$/);
+		if (editMatch) {
+			const editFile = path.join(__dirname, '..', 'build', 'www', 'wiki', 'edit.html');
+			if (fs.existsSync(editFile)) return res.sendFile(editFile);
+		}
 		if (!req.path.startsWith('/wiki')) return next();
 		// map /wiki or /wiki/ to /wiki/index.html
 		const rel = req.path === '/wiki' ? '/wiki/index' : req.path;
@@ -244,35 +259,88 @@ app.get('/api/wiki', (req, res) => {
     res.json(list);
 });
 
+// return single article
+app.get('/api/wiki/:id', (req, res) => {
+	const id = parseInt(req.params.id);
+	const art = Wiki.get(id);
+	if (!art) return res.status(404).json({ error: 'article not found' });
+	res.json(art);
+});
+
+// increment view count (public) — treat missing article as no-op (204)
+app.post('/api/wiki/:id/view', (req, res) => {
+	const id = parseInt(req.params.id);
+	const v = Wiki.incrementViews(id);
+	if (v === null) return res.status(204).end();
+	io.emit('wiki:view', { id, views: v });
+	res.json({ ok: true, views: v });
+});
+
+// add comment
+app.post('/api/wiki/:id/comment', ensureAuth, (req, res) => {
+	const id = parseInt(req.params.id);
+	const { content } = req.body;
+	if (!content) return res.status(400).json({ error: 'content required' });
+	const comment = Wiki.addComment(id, { author: req.session.user, content });
+	if (!comment) return res.status(404).json({ error: 'article not found' });
+	io.emit('wiki:comment', { id, comment });
+	res.json(comment);
+});
+
+// add reply to comment
+app.post('/api/wiki/:id/comment/:cid/reply', ensureAuth, (req, res) => {
+	const id = parseInt(req.params.id);
+	const cid = parseInt(req.params.cid);
+	const { content } = req.body;
+	if (!content) return res.status(400).json({ error: 'content required' });
+	const reply = Wiki.addReply(id, cid, { author: req.session.user, content });
+	if (!reply) return res.status(404).json({ error: 'article or comment not found' });
+	io.emit('wiki:reply', { id, commentId: cid, reply });
+	res.json(reply);
+});
+
 // create a new article
 app.post('/api/wiki', ensureAuth, async (req, res) => {
-    const { title, category, content } = req.body;
-    if (!(await Wiki.moderate(title)) || !(await Wiki.moderate(content))) {
-        return res.status(400).json({ error: 'Content failed moderation' });
-    }
-    const article = Wiki.create({ title, category, content, author: req.session.user });
-    io.emit('wiki:update', article);
-    res.json(article);
+	const { title, category, content } = req.body;
+	const guid = req.session.user; // use session user as guid
+	if (!(await Wiki.moderate(title)) || !(await Wiki.moderate(content))) {
+		return res.status(400).json({ error: 'Content failed moderation' });
+	}
+	const article = Wiki.create({ title, category, content, author: req.session.user, guid });
+	io.emit('wiki:update', article);
+	res.json(article);
 });
 
 // update existing article
 app.put('/api/wiki/:id', ensureAuth, async (req, res) => {
-    const id = parseInt(req.params.id);
-    if (!(await Wiki.moderate(req.body.title)) || !(await Wiki.moderate(req.body.content))) {
-        return res.status(400).json({ error: 'Content failed moderation' });
-    }
-    const art = Wiki.update(id, { ...req.body, author: req.session.user });
-    if (!art) return res.status(404).end();
-    io.emit('wiki:update', art);
-    res.json(art);
+	const id = parseInt(req.params.id);
+	const guid = req.session.user;
+	if (!(await Wiki.moderate(req.body.title)) || !(await Wiki.moderate(req.body.content))) {
+		return res.status(400).json({ error: 'Content failed moderation' });
+	}
+	let art = Wiki.get(id);
+	// Allow update if the article author matches session user OR guid matches
+	if (art && (art.author === req.session.user || (art.guid && art.guid === guid))) {
+		art = Wiki.update(id, { ...req.body, author: req.session.user, guid });
+		io.emit('wiki:update', art);
+		return res.json(art);
+	}
+	return res.status(403).json({ error: 'You are not the owner of this article.' });
 });
 
 // delete article
 app.delete('/api/wiki/:id', ensureAuth, (req, res) => {
-    const id = parseInt(req.params.id);
-    Wiki.remove(id);
-    io.emit('wiki:update', { id });
-    res.status(204).end();
+	const id = parseInt(req.params.id);
+	const guid = req.session.user;
+	const art = Wiki.get(id);
+	if (!art) return res.status(404).json({ error: 'article not found' });
+	// Allow delete if author matches or guid matches
+	if (art.author === req.session.user || (art.guid && art.guid === guid)) {
+		Wiki.remove(id);
+		io.emit('wiki:update', { id });
+		return res.status(204).end();
+	}
+	return res.status(403).json({ error: 'You are not the owner of this article.' });
 });
 
 // Health check endpoint for hosting platforms
@@ -291,6 +359,45 @@ try {
 
 // ========================================================================
 // Helper functions
+// In-memory article lock system
+const articleLocks = {};
+// Lock timeout in ms (e.g., 5 minutes)
+const LOCK_TIMEOUT = 5 * 60 * 1000;
+
+// Lock an article for a user
+app.post('/api/wiki/:id/lock', ensureAuth, (req, res) => {
+	const id = parseInt(req.params.id);
+	const user = req.session.user;
+	const now = Date.now();
+	// If locked by someone else and not expired
+	if (articleLocks[id] && articleLocks[id].user !== user && (now - articleLocks[id].time < LOCK_TIMEOUT)) {
+		return res.status(423).json({ error: 'Article is currently being edited by another user.' });
+	}
+	// Lock or refresh lock
+	articleLocks[id] = { user, time: now };
+	res.json({ ok: true });
+});
+
+// Unlock an article (on save, cancel, or navigation away)
+app.post('/api/wiki/:id/unlock', ensureAuth, (req, res) => {
+	const id = parseInt(req.params.id);
+	const user = req.session.user;
+	if (articleLocks[id] && articleLocks[id].user === user) {
+		delete articleLocks[id];
+	}
+	res.json({ ok: true });
+});
+
+// Check lock status
+app.get('/api/wiki/:id/lock', ensureAuth, (req, res) => {
+	const id = parseInt(req.params.id);
+	const user = req.session.user;
+	const now = Date.now();
+	if (articleLocks[id] && articleLocks[id].user !== user && (now - articleLocks[id].time < LOCK_TIMEOUT)) {
+		return res.status(423).json({ error: 'Article is currently being edited by another user.' });
+	}
+	res.json({ ok: true });
+});
 // ========================================================================
 
 try {

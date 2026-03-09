@@ -64,8 +64,11 @@ function create(article) {
         category: article.category || '',
         content: article.content || '',
         author: article.author || 'anonymous',
+        guid: article.guid || null, // store owner's guid
         date: new Date().toISOString(),
-        versions: [] // history of edits
+        versions: [], // history of edits
+        views: 0,
+        comments: []
     };
     data.push(entry);
     save();
@@ -75,6 +78,10 @@ function create(article) {
 function update(id, article) {
     const idx = data.findIndex(a => a.id === id);
     if (idx === -1) return null;
+    // Only allow update if guid matches
+    if (article.guid && data[idx].guid && article.guid !== data[idx].guid) {
+        return null;
+    }
     // push previous state into versions
     const old = {...data[idx]};
     delete old.versions;
@@ -91,9 +98,54 @@ function update(id, article) {
     return data[idx];
 }
 
+function incrementViews(id) {
+    const idx = data.findIndex(a => a.id === id);
+    if (idx === -1) return null;
+    data[idx].views = (data[idx].views || 0) + 1;
+    save();
+    return data[idx].views;
+}
+
+function addComment(id, comment) {
+    const idx = data.findIndex(a => a.id === id);
+    if (idx === -1) return null;
+    const cnext = data[idx].comments && data[idx].comments.length ? Math.max(...data[idx].comments.map(c=>c.id)) + 1 : 1;
+    const entry = {
+        id: cnext,
+        author: comment.author || 'anonymous',
+        content: comment.content || '',
+        date: new Date().toISOString(),
+        replies: []
+    };
+    data[idx].comments = data[idx].comments || [];
+    data[idx].comments.push(entry);
+    save();
+    return entry;
+}
+
+function addReply(id, commentId, reply) {
+    const idx = data.findIndex(a => a.id === id);
+    if (idx === -1) return null;
+    const comments = data[idx].comments || [];
+    const cidx = comments.findIndex(c => c.id === commentId);
+    if (cidx === -1) return null;
+    const rnext = comments[cidx].replies && comments[cidx].replies.length ? Math.max(...comments[cidx].replies.map(r=>r.id)) + 1 : 1;
+    const entry = {
+        id: rnext,
+        author: reply.author || 'anonymous',
+        content: reply.content || '',
+        date: new Date().toISOString()
+    };
+    comments[cidx].replies = comments[cidx].replies || [];
+    comments[cidx].replies.push(entry);
+    save();
+    return entry;
+}
+
 function remove(id) {
     data = data.filter(a => a.id !== id);
     save();
+    // Optionally, could enforce guid check here if needed
 }
 
 // moderation using external AI service if configured, otherwise fallback
@@ -135,5 +187,8 @@ module.exports = {
     create,
     update,
     remove,
+    incrementViews,
+    addComment,
+    addReply,
     moderate
 };

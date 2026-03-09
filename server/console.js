@@ -167,9 +167,13 @@ exports.listen = function() {
             let command = list[0].toLowerCase();
             let args = list.slice(1);
             let argsString = args.join(" ");
-            commands[command].function(args);
+            if (commands[command] && typeof commands[command].function === 'function') {
+                commands[command].function(args);
+            } else {
+                console.log("Invalid command: " + command);
+            }
         } catch(e) {
-            console.log("Invalid command.");
+            console.log("Error while executing command.");
             console.log(e);
         }
     });
